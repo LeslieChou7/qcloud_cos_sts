@@ -1,0 +1,8 @@
+{application, cos_sts, [
+    {description, "Qcloud cos sts sdk for Erlang."},
+    {vsn, "0.1.0"},
+    {modules, [cos_sts]},
+    {applications, [kernel, stdlib, crypto, jsx]},
+    {env, []},
+    {licenses, ["Apache 2"]}
+]}.

@@ -1,0 +1,1 @@
+Qcloud cos sts sdk for Erlang.
