@@ -214,8 +214,8 @@ get_credential(Sts) ->
     Method = post,
     Url = Sts#sts.url,
     Headers = [],
-    ContentType = "application/json",
-    Body = jsx:encode([{<<"Signature">>, Sign} | Data]),
+    ContentType = "application/x-www-form-urlencoded",
+    Body = list_to_binary(flat_params([{<<"Signature">>, Sign} | Data])),
     HttpOpts = [{timeout, 5000}],
     Opts = [],
     case httpc:request(Method, {Url, Headers, ContentType, Body}, HttpOpts, Opts) of
