@@ -1,9 +1,8 @@
 %%%-------------------------------------------------------------------
-%%% @author lesliechou
+%%% @author lesliechou lesliechou7@outlook.com
 %%% @doc
-%%% Qcloud cos sts interface.
+%%% Sts service interface module.
 %%% @end
-%%% Created : 26. 11月 2021 0:01
 %%%-------------------------------------------------------------------
 -module(cos_sts).
 -author("lesliechou").
@@ -18,8 +17,8 @@
     allow_actions, policy, network_proxy, url, domain
 }).
 
-%% @doc Init sts config.
--spec init(Config :: map()) -> {ok, Sts :: #sts{}} | {error, Reason :: term()}.
+%% @doc Init the client config.
+-spec init(map()) -> #sts{} | {error, Reason :: term()}.
 init(Config) when is_map(Config) ->
     InitOpts = [
         secret_id, secret_key, duration_seconds, bucket, region,
@@ -154,8 +153,7 @@ check_sts([], Config, Sts) ->
     case Sts#sts.policy of
         "" ->
             init_resource(Config, Sts);
-        _ ->
-            {ok, Sts}
+        _ -> Sts
     end.
 
 init_resource(Config, Sts) ->
@@ -172,95 +170,152 @@ init_resource(Config, Sts) ->
         Resource = lists:concat([
             "qcs::cos:", Region, ":uid/", AppId, ":", Bucket, RealResourcePrefix
         ]),
-        {ok, Sts#sts{resource = Resource}}
+        Sts#sts{resource = Resource}
     catch
         _ : _ ->
             {error, {invalid_value, bucket}}
     end.
 
-%% @doc Request for credential.
+%% @doc Get credential from Qcloud cam.
 -spec get_credential(#sts{}) -> map() | {error, Reason :: term()}.
 get_credential(Sts) ->
     Policy = case Sts#sts.policy of
                  "" ->
                      [
-                         {<<"version">>, "2.0"},
+                         {<<"version">>, <<"2.0">>},
                          {<<"statement">>, [
                              [
-                                 {<<"action">>, Sts#sts.allow_actions},
-                                 {<<"effect">>, "allow"},
-                                 {<<"resource">>, Sts#sts.resource}
+                                 {<<"action">>, [list_to_binary(Sts#sts.allow_actions)]},
+                                 {<<"effect">>, <<"allow">>},
+                                 {<<"resource">>, [list_to_binary(Sts#sts.resource)]}
                              ]
                          ]}
                      ];
                  _ ->
-                     Sts#sts.policy
+                     {struct, list_to_binary(Sts#sts.policy)}
              end,
-    PolicyEncode = http_uri:encode(jsx:encode(Policy)),
+    PolicyEncode = jsx:encode(Policy),
 
+    Now = timestamp(),
     Data = [
-        {<<"SecretId">>, Sts#sts.secret_id},
-        {<<"Timestamp">>, timestamp()},
-        {<<"Nonce">>, random_number(100000, 200000)},
-        {<<"Action">>, "GetFederationToken"},
-        {<<"Version">>, "2018-08-13"},
-        {<<"DurationSeconds">>, Sts#sts.duration_seconds},
-        {<<"Name">>, "cos-sts-erlang"},
+        {<<"Name">>, <<"cos-sts-erlang">>},
         {<<"Policy">>, PolicyEncode},
-        {<<"Region">>, Sts#sts.region}
+        {<<"DurationSeconds">>, Sts#sts.duration_seconds}
     ],
-    Sign = encrypt(Sts, "POST", Sts#sts.domain, Data),
+    Body = binary_to_list(jsx:encode(Data)),
+
+    ContentType = "application/json",
+    EncryptHeaders = [
+        {"Content-Type", ContentType},
+        {"Host", ?sts_domain}
+    ],
+    Sign = encrypt(Sts, "POST", EncryptHeaders, Body, Now),
 
     Method = post,
     Url = Sts#sts.url,
-    Headers = [],
-    ContentType = "application/x-www-form-urlencoded",
-    Body = list_to_binary(flat_params([{<<"Signature">>, Sign} | Data])),
+    Headers = EncryptHeaders ++ [
+        {"Connection", "close"},
+        {"X-TC-Action", "GetFederationToken"},
+        {"X-TC-RequestClient", "APIExplorer"},
+        {"X-TC-Timestamp", integer_to_list(Now)},
+        {"X-TC-Version", "2018-08-13"},
+        {"X-TC-Region", "ap-shanghai"},
+        {"X-TC-Language", "zh-CN"},
+        {"Authorization", Sign}
+    ],
     HttpOpts = [{timeout, 5000}],
     Opts = [],
-    case httpc:request(Method, {Url, Headers, ContentType, Body}, HttpOpts, Opts) of
-        {ok, Result} ->
-            case jsx:decode(Result) of
-                ResultMap when is_map(ResultMap) ->
-                    parse_response(ResultMap);
-                _ ->
-                    {error, {json_decode_fail}}
-            end;
-        {error, Reason} ->
-            {error, Reason}
+
+    try
+        case httpc:request(Method, {Url, Headers, ContentType, Body}, HttpOpts, Opts) of
+            {ok, {_, _, ResponseBody}} ->
+                case jsx:decode(list_to_binary(ResponseBody)) of
+                    Response when is_map(Response) ->
+                        Response;
+                    _ ->
+                        {error, {json_decode_fail, ResponseBody}}
+                end;
+            {error, Reason} ->
+                {error, Reason}
+        end
+    catch
+        EType : EReason ->
+            io:format("Get credential fail, error_type: ~w, reason: ~w~n", [EType, EReason]),
+            {error, {EType, EReason}}
     end.
 
 timestamp() ->
     {M, S, _} = os:timestamp(),
     M * 1000000 + S.
 
-random_number(Min, Max) when is_integer(Min), is_integer(Max), Min < Max ->
-    rand:seed(os:timestamp()),
-    Min + rand:uniform(Max - Min).
+%% Calculate the signature using algorithm v3.
+encrypt(Sts, HTTPRequestMethod, Headers, Body, RequestTimestamp) ->
+    CanonicalURI = "/",
+    CanonicalQueryString = "",
+    {SignedHeadersList, CanonicalHeaders} = lists:foldr(
+        fun({Key, Value}, {AccSignedHeadersList, AccCanonicalHeaders}) ->
+            RealKey = string:to_lower(string:strip(Key, both)),
+            NewAccSignedHeaders = [RealKey | AccSignedHeadersList],
+            NewAccCanonicalHeaders =
+                case is_list(Value) of
+                    true ->
+                        RealValue = string:to_lower(string:strip(Value, both)),
+                        lists:concat([RealKey, ":", RealValue, "\n"]) ++ AccCanonicalHeaders;
+                    false ->
+                        lists:concat([RealKey, ":", Value, "\n"]) ++ AccCanonicalHeaders
+                end,
+            {NewAccSignedHeaders, NewAccCanonicalHeaders}
+        end, {"", ""}, Headers),
+    SignedHeaders = string:join(SignedHeadersList, ";"),
+    HashedRequestPayload = binary_to_4bit_list(crypto:hash(sha256, Body)),
+    CanonicalRequest = lists:concat([
+        HTTPRequestMethod, "\n",
+        CanonicalURI, "\n",
+        CanonicalQueryString, "\n",
+        CanonicalHeaders, "\n",
+        SignedHeaders, "\n",
+        HashedRequestPayload
+    ]),
 
-encrypt(Sts, Method, Domain, KV) ->
-    KVString = flat_params(KV),
-    Source = lists:concat([Method, Domain, "/?", KVString]),
-    Sign = crypto:mac(hmac, sha,
-        unicode:characters_to_binary(Sts#sts.secret_key),
-        unicode:characters_to_binary(Source)
-    ),
-    string:strip(base64:encode_to_string(Sign), right).
+    Algorithm = "TC3-HMAC-SHA256",
+    Date = utc_date_string(),
+    Service = "sts",
+    CredentialScope = lists:concat([Date, "/", Service, "/tc3_request"]),
+    HashedCanonicalRequest = binary_to_4bit_list(crypto:hash(sha256, CanonicalRequest)),
+    StringToSign = lists:concat([
+        Algorithm, "\n",
+        RequestTimestamp, "\n",
+        CredentialScope, "\n",
+        HashedCanonicalRequest
+    ]),
 
-flat_params(KV) ->
-    flat_params(lists:reverse(KV), []).
-flat_params([{Key, Value} | T], KVStringList) ->
-    flat_params(T, [lists:concat([binary_to_list(Key), "=", Value]) | KVStringList]);
-flat_params([], KVStringList) ->
-    string:join(KVStringList, "&").
+    SecretKey = Sts#sts.secret_key,
+    SecretDate = crypto:mac(hmac, sha256, "TC3" ++ SecretKey, Date),
+    SecretService = crypto:mac(hmac, sha256, SecretDate, Service),
+    SecretSigning = crypto:mac(hmac, sha256, SecretService, "tc3_request"),
+    Signature = binary_to_4bit_list(crypto:mac(hmac, sha256, SecretSigning, StringToSign)),
 
-parse_response(Map) ->
-    maps:fold(
-        fun(Key, Value, AccMap) ->
-            case is_map(Value) of
+    SecretId = Sts#sts.secret_id,
+    lists:concat([
+        Algorithm, " ",
+        "Credential=", SecretId, "/", CredentialScope, ", ",
+        "SignedHeaders=", SignedHeaders, ", ",
+        "Signature=", Signature
+    ]).
+
+binary_to_4bit_list(Binary) ->
+    string:to_lower(lists:flatten([io_lib:format("~2.16.0b", [N]) || N <- binary_to_list(Binary)])).
+
+utc_date_string() ->
+    {{Y, M, D}, _} = calendar:universal_time(),
+    RealM = case M < 10 of
                 true ->
-                    AccMap#{binary_to_atom(Key, utf8) => parse_response(Value)};
-                false ->
-                    AccMap#{binary_to_atom(Key, utf8) => Value}
-            end
-        end, #{}, Map).
+                    [$0 | integer_to_list(M)];
+                false -> M
+            end,
+    RealD = case D < 10 of
+                true ->
+                    [$0 | integer_to_list(D)];
+                false -> D
+            end,
+    lists:concat([Y, "-", RealM, "-", RealD]).
