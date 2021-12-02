@@ -192,7 +192,7 @@ get_credential(Sts) ->
                          ]}
                      ];
                  _ ->
-                     {struct, list_to_binary(Sts#sts.policy)}
+                     Sts#sts.policy
              end,
     PolicyEncode = jsx:encode(Policy),
 
