@@ -1,7 +1,7 @@
 %%%-------------------------------------------------------------------
 %%% @author lesliechou lesliechou7@outlook.com
 %%% @doc
-%%% Sts service interface module.
+%%% Qcloud cos sts service interface module.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(cos_sts).
