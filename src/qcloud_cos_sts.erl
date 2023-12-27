@@ -1,10 +1,10 @@
 %%%-------------------------------------------------------------------
-%%% @author lesliechou lesliechou7@outlook.com
-%%% @doc
-%%% Qcloud cos sts service interface module.
-%%% @end
+%% @author lesliechou lesliechou7@outlook.com
+%% @doc
+%% Qcloud COS STS service module.
+%% @end
 %%%-------------------------------------------------------------------
--module(cos_sts).
+-module(qcloud_cos_sts).
 -author("lesliechou").
 
 -export([init/1, get_credential/1]).

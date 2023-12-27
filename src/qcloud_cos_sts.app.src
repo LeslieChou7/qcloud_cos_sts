@@ -1,0 +1,8 @@
+{application, qcloud_cos_sts, [
+    {description, "Qcloud COS STS SDK for Erlang"},
+    {vsn, "1.0.0"},
+    {modules, [qcloud_cos_sts]},
+    {applications, [kernel, stdlib, crypto, inets, ssl, jsx]},
+    {env, []},
+    {licenses, ["MIT License"]}
+]}.

@@ -1,10 +1,10 @@
 %%%-------------------------------------------------------------------
-%%% @author lesliechou lesliechou7@outlook.com
-%%% @doc
-%%% Sts test interface module.
-%%% @end
+%% @author lesliechou lesliechou7@outlook.com
+%% @doc
+%% Sts test interface module.
+%% @end
 %%%-------------------------------------------------------------------
--module(cos_sts_test).
+-module(qcloud_cos_sts_test).
 -author("lesliechou").
 
 -include_lib("eunit/include/eunit.hrl").
