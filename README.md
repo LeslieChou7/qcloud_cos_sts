@@ -1,1 +1,1 @@
-Qcloud cos sts sdk for Erlang.
+QCloud COS STS SDK for Erlang.
